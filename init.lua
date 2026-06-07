@@ -46,6 +46,21 @@
 --- numeric id as a string. UUID and name are stable across reboots; numeric
 --- ids are not.
 ---
+--- Run this in the Hammerspoon console to list your screens:
+---
+--- ```lua
+--- for i, s in ipairs(hs.screen.allScreens()) do
+---     print(string.format("  [%d] %s  (UUID: %s)", i, s:name(), s:getUUID()))
+--- end
+--- ```
+---
+--- Example output:
+---
+--- ```
+---   [1] Built-in Retina Display  (UUID: 37D8832A-2D66-02CA-B9F7-8F30A301B230)
+---   [2] GF270M                   (UUID: A127AC03-26F1-452E-A399-51B091E616F7)
+--- ```
+---
 --- ```lua
 --- PaperLine.per_screen = {
 ---     ["Built-in Retina Display"] = { icon_size = 18, height = 32, x_offset = 600 },
