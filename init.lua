@@ -108,7 +108,7 @@ PaperLine.logger = Logger.new(PaperLine.name)
 PaperLine.height = 48
 PaperLine.icon_size = 25
 PaperLine.icon_padding = 8
-PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
+PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0.2 }
 PaperLine.active_color = { red = 1, green = 1, blue = 1, alpha = 0.75 }
 PaperLine.inactive_alpha = 1
 PaperLine.max_icons = nil
@@ -290,7 +290,7 @@ local function make_canvas(screen, cfg, click_to_focus_getter, on_click)
     local c = Canvas.new({
         x = base_x + (cfg.x_offset or 0),
         y = base_y + (cfg.y_offset or 0),
-        w = visible.w,
+        w = cfg.icon_size + cfg.icon_padding * 2,
         h = cfg.height,
     })
     c:behavior({
@@ -299,6 +299,10 @@ local function make_canvas(screen, cfg, click_to_focus_getter, on_click)
         hs.canvas.windowBehaviors.ignoresCycle,
     })
     c:level(Canvas.windowLevels.status)
+    -- never steal keyboard focus / activate Hammerspoon when clicked
+    if c.clickActivating then
+        c:clickActivating(false)
+    end
     c:mouseCallback(function(_canvas, event, id, _)
         if event == "mouseUp" and click_to_focus_getter() and type(id) == "string" then
             on_click(id)
@@ -313,19 +317,20 @@ end
 
 -- (1a) layout_slots — pure-ish, data-in / data-out.
 -- Walks items in PaperWM order, decides per-item geometry, and emits a list
--- of project-specific "slots". No canvas DSL knowledge lives here.
+-- of project-specific "slots". No canvas DSL knowledge lives here. The bar
+-- contracts to its content: width is the icons plus symmetric padding.
 ---@param items table[]
 ---@param focused_id number|nil
----@param canvas_w number
 ---@param cfg table
 ---@param icon_resolver fun(bundle_id: string|nil, size: number): userdata|nil
----@return table[]
-local function layout_slots(items, focused_id, canvas_w, cfg, icon_resolver)
+---@return table[] slots, number content_w
+local function layout_slots(items, focused_id, cfg, icon_resolver)
     local slots = {}
-    slots[#slots + 1] = { kind = "background", x = 0, y = 0, w = canvas_w, h = cfg.height }
+    local limit = cfg.max_icons and math.min(#items, cfg.max_icons) or #items
+    local content_w = cfg.icon_padding + limit * (cfg.icon_size + cfg.icon_padding)
+    slots[#slots + 1] = { kind = "background", x = 0, y = 0, w = content_w, h = cfg.height }
     local x_cursor = cfg.icon_padding
     local y_icon = math.floor((cfg.height - cfg.icon_size) / 2)
-    local limit = cfg.max_icons and math.min(#items, cfg.max_icons) or #items
     for i = 1, limit do
         local item = items[i]
         local is_focused = focused_id and item.window and item.window:id() == focused_id
@@ -364,7 +369,7 @@ local function layout_slots(items, focused_id, canvas_w, cfg, icon_resolver)
         end
         x_cursor = x_cursor + cfg.icon_size + cfg.icon_padding
     end
-    return slots
+    return slots, content_w
 end
 
 -- (1b) render_slots — the only place that knows the Hammerspoon canvas DSL.
@@ -499,13 +504,17 @@ function CanvasManager:get_or_create(screen, cfg)
     return canvas
 end
 
--- render new elements on the screen's canvas, persist items for click routing
+-- render new elements on the screen's canvas, persist items for click routing.
+-- Resizes the canvas to the measured content width so the bar contracts to
+-- min content and blank screen area is never part of the (clickable) canvas.
 ---@param screen userdata hs.screen
 ---@param items table[]
 ---@param elements table[]
 ---@param cfg table
-function CanvasManager:show_with(screen, items, elements, cfg)
+---@param content_w number
+function CanvasManager:show_with(screen, items, elements, cfg, content_w)
     local canvas = self:get_or_create(screen, cfg)
+    canvas:size({ w = content_w, h = cfg.height })
     canvas:replaceElements(elements)
     canvas:show()
     self._items[screen:id()] = items
@@ -575,10 +584,9 @@ local function redraw_screen(screen, source, cfg)
     local focused_window = Window.focusedWindow()
     local focused_id = focused_window and focused_window:id() or nil
 
-    local canvas_w = visible_frame(screen).w
-    local slots = layout_slots(items, focused_id, canvas_w, cfg, cached_icon)
+    local slots, content_w = layout_slots(items, focused_id, cfg, cached_icon)
     local elements = render_slots(slots, cfg)
-    canvas_manager:show_with(screen, items, elements, cfg)
+    canvas_manager:show_with(screen, items, elements, cfg, content_w)
 end
 
 ---redraw the bar on all configured screens
