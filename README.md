@@ -1,5 +1,8 @@
 # PaperLine.spoon
 
+<img width="290" height="59" alt="image" src="https://github.com/user-attachments/assets/eecb2ec6-7003-4c96-abd5-58c5981151f7" />
+
+
 A Hammerspoon spoon that draws a status bar at the top of the screen with the
 app icons of your currently focused PaperWM windows, in the same order as
 `PaperWM.state.windowList(space)` — left-to-right across columns, top-to-bottom
