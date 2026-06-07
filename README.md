@@ -63,7 +63,9 @@ re-read them on the next redraw.
 | `max_icons`            | `nil`                         | Max icons to draw; `nil` = all                    |
 | `click_to_focus`       | `true`                        | Click an icon to focus that window                |
 | `show_on_all_screens`  | `true`                        | Show on every screen                              |
-| `position`             | `"below_menubar"`             | `"below_menubar"` or `"top"` (overlays menubar)   |
+| `position`             | `"top"`                       | `"top"` (overlays menubar) or `"below_menubar"`   |
+| `x_offset`             | `0`                           | Horizontal offset in pixels from default position |
+| `y_offset`             | `0`                           | Vertical offset in pixels from default position   |
 | `start_hidden`         | `false`                       | If true, start with bar hidden                    |
 
 Example:
@@ -71,7 +73,8 @@ Example:
 ```lua
 PaperLine.height = 28
 PaperLine.icon_size = 18
-PaperLine.position = "top"  -- overlay the system menu bar
+PaperLine.x_offset = 100    -- 100px from the left edge
+PaperLine.y_offset = -4     -- 4px above the default position
 PaperLine.bg_color = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0.75 }
 PaperLine:start()
 ```

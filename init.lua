@@ -29,7 +29,9 @@
 --- - `PaperLine.max_icons`          max icons to draw; `nil` = all
 --- - `PaperLine.click_to_focus`     clicking an icon focuses that window (default: true)
 --- - `PaperLine.show_on_all_screens` show on every screen (default: true)
---- - `PaperLine.position`           "below_menubar" (default) or "top"
+--- - `PaperLine.position`           "top" (default, overlays menubar) or "below_menubar"
+--- - `PaperLine.x_offset`           horizontal offset in pixels from default position (default: 0)
+--- - `PaperLine.y_offset`           vertical offset in pixels from default position (default: 0)
 --- - `PaperLine.start_hidden`       start with bar hidden (default: false)
 ---
 --- # Hotkeys
@@ -61,16 +63,18 @@ PaperLine.homepage = "https://github.com/.../PaperLine.spoon"
 PaperLine.logger = Logger.new(PaperLine.name)
 
 -- configuration with sensible defaults
-PaperLine.height = 32
-PaperLine.icon_size = 22
+PaperLine.height = 48
+PaperLine.icon_size = 28
 PaperLine.icon_padding = 6
-PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0.55 }
+PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
 PaperLine.active_color = { red = 1, green = 0.55, blue = 0.10, alpha = 0.95 }
-PaperLine.inactive_alpha = 0.7
+PaperLine.inactive_alpha = 1
 PaperLine.max_icons = nil
 PaperLine.click_to_focus = true
 PaperLine.show_on_all_screens = true
-PaperLine.position = "below_menubar"
+PaperLine.position = "top"
+PaperLine.x_offset = 970
+PaperLine.y_offset = -2
 PaperLine.start_hidden = false
 PaperLine.default_hotkeys = {
     toggle = { { "cmd", "shift" }, "p" },
@@ -79,6 +83,7 @@ PaperLine.default_hotkeys = {
 
 -- internal state
 local canvas_per_screen = {}     -- [screen_id:number] = canvas
+local canvas_position_key = {}   -- [screen_id:number] = string identifying position config
 local last_items = {}           -- [screen_id:number] = items table (for click-to-focus)
 local icon_cache = {}           -- [bundle_id@size] = hs.image
 local refresh_timer = nil
@@ -88,6 +93,15 @@ local window_filter = nil
 local screen_watcher = nil
 local space_watcher = nil
 local app_watcher = nil
+
+---compute a stable key for the current position-affecting config
+---@return string
+local function position_key()
+    return string.format("%s|%d|%d",
+        PaperLine.position or "top",
+        PaperLine.x_offset or 0,
+        PaperLine.y_offset or 0)
+end
 
 ---find the loaded PaperWM module (returns nil if not loaded)
 ---@return table|nil
@@ -163,15 +177,17 @@ end
 local function make_canvas(screen)
     local visible = visible_frame(screen)
     local full = full_frame(screen)
-    local y
+    local base_x, base_y
     if PaperLine.position == "top" then
-        y = full.y
+        base_x = full.x
+        base_y = full.y
     else
-        y = visible.y
+        base_x = visible.x
+        base_y = visible.y
     end
     local c = Canvas.new({
-        x = visible.x,
-        y = y,
+        x = base_x + (PaperLine.x_offset or 0),
+        y = base_y + (PaperLine.y_offset or 0),
         w = visible.w,
         h = PaperLine.height,
     })
@@ -299,6 +315,7 @@ local function redraw_screen(screen, paperwm)
             canvas_per_screen[sid]:delete()
             canvas_per_screen[sid] = nil
         end
+        canvas_position_key[sid] = nil
         last_items[sid] = nil
         return
     end
@@ -307,9 +324,12 @@ local function redraw_screen(screen, paperwm)
     local focused_id = focused_window and focused_window:id() or nil
 
     local canvas = canvas_per_screen[sid]
-    if not canvas then
+    local key = position_key()
+    if not canvas or canvas_position_key[sid] ~= key then
+        if canvas then canvas:delete() end
         canvas = make_canvas(screen)
         canvas_per_screen[sid] = canvas
+        canvas_position_key[sid] = key
     end
 
     local canvas_w = canvas:frame().w
@@ -342,6 +362,7 @@ function PaperLine:redraw()
         if not alive[sid] then
             canvas:delete()
             canvas_per_screen[sid] = nil
+            canvas_position_key[sid] = nil
             last_items[sid] = nil
         end
     end
@@ -393,6 +414,7 @@ function PaperLine:stop()
     for sid, canvas in pairs(canvas_per_screen) do
         canvas:delete()
         canvas_per_screen[sid] = nil
+        canvas_position_key[sid] = nil
     end
     last_items = {}
     return self
@@ -407,6 +429,7 @@ function PaperLine:toggle()
         for sid, canvas in pairs(canvas_per_screen) do
             canvas:delete()
             canvas_per_screen[sid] = nil
+            canvas_position_key[sid] = nil
         end
     end
 end
