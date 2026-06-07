@@ -64,8 +64,8 @@ PaperLine.logger = Logger.new(PaperLine.name)
 
 -- configuration with sensible defaults
 PaperLine.height = 48
-PaperLine.icon_size = 28
-PaperLine.icon_padding = 6
+PaperLine.icon_size = 25
+PaperLine.icon_padding = 8
 PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
 PaperLine.active_color = { red = 1, green = 0.55, blue = 0.10, alpha = 0.95 }
 PaperLine.inactive_alpha = 1
@@ -73,8 +73,8 @@ PaperLine.max_icons = nil
 PaperLine.click_to_focus = true
 PaperLine.show_on_all_screens = true
 PaperLine.position = "top"
-PaperLine.x_offset = 970
-PaperLine.y_offset = -2
+PaperLine.x_offset = 960
+PaperLine.y_offset = -3
 PaperLine.start_hidden = false
 PaperLine.default_hotkeys = {
     toggle = { { "cmd", "shift" }, "p" },
@@ -242,11 +242,12 @@ local function build_elements(items, focused_id, canvas_w)
                 fillColor = { red = 0, green = 0, blue = 0, alpha = 0 },
                 strokeColor = PaperLine.active_color,
                 strokeWidth = 2,
+                roundedRectRadii = { xRadius = 6, yRadius = 6 },
                 frame = {
-                    x = x_cursor - 2,
-                    y = y_icon - 2,
-                    w = PaperLine.icon_size + 4,
-                    h = PaperLine.icon_size + 4,
+                    x = x_cursor - 0.5,
+                    y = y_icon - 0.5,
+                    w = PaperLine.icon_size + 1,
+                    h = PaperLine.icon_size + 1,
                 },
             })
         end
