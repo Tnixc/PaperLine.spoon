@@ -23,15 +23,15 @@
 --- - `PaperLine.height`             bar height in pixels (default: 48)
 --- - `PaperLine.icon_size`          icon size in pixels (default: 25)
 --- - `PaperLine.icon_padding`       gap between icons (default: 8)
---- - `PaperLine.bg_color`           bar background color table
---- - `PaperLine.active_color`       highlight color for the focused window's icon
+--- - `PaperLine.bg_color`           bar background color table (default: fully transparent)
+--- - `PaperLine.active_color`       highlight color for the focused window's icon (default: white @ 0.75 alpha)
 --- - `PaperLine.inactive_alpha`     alpha for non-focused icons (default: 1)
 --- - `PaperLine.max_icons`          max icons to draw; `nil` = all
 --- - `PaperLine.click_to_focus`     clicking an icon focuses that window (default: true)
 --- - `PaperLine.show_on_all_screens` show on every screen (default: true)
 --- - `PaperLine.position`           "top" (default, overlays menubar) or "below_menubar"
---- - `PaperLine.x_offset`           horizontal offset in pixels from default position (default: 0)
---- - `PaperLine.y_offset`           vertical offset in pixels from default position (default: 0)
+--- - `PaperLine.x_offset`           horizontal offset in pixels from default position (default: 960)
+--- - `PaperLine.y_offset`           vertical offset in pixels from default position (default: -3)
 --- - `PaperLine.start_hidden`       start with bar hidden (default: false)
 --- - `PaperLine.paperwm_source_fn`  override the PaperWM source for tests (see below)
 ---

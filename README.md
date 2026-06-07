@@ -50,18 +50,18 @@ re-read them on the next redraw.
 
 | Key                    | Default                       | Description                                       |
 | ---------------------- | ----------------------------- | ------------------------------------------------- |
-| `height`               | `32`                          | Bar height in pixels                              |
-| `icon_size`            | `22`                          | Icon size in pixels                               |
-| `icon_padding`         | `6`                           | Gap between icons (also left/right edge padding)  |
-| `bg_color`             | translucent black             | Bar background color table                        |
-| `active_color`         | orange                        | Border color for the focused window's icon        |
-| `inactive_alpha`       | `0.7`                         | Alpha for non-focused icons                       |
+| `height`               | `48`                          | Bar height in pixels                              |
+| `icon_size`            | `25`                          | Icon size in pixels                               |
+| `icon_padding`         | `8`                           | Gap between icons (also left/right edge padding)  |
+| `bg_color`             | fully transparent             | Bar background color table                        |
+| `active_color`         | white @ 0.75 alpha            | Border color for the focused window's icon        |
+| `inactive_alpha`       | `1`                           | Alpha for non-focused icons                       |
 | `max_icons`            | `nil`                         | Max icons to draw; `nil` = all                    |
 | `click_to_focus`       | `true`                        | Click an icon to focus that window                |
 | `show_on_all_screens`  | `true`                        | Show on every screen                              |
 | `position`             | `"top"`                       | `"top"` (overlays menubar) or `"below_menubar"`   |
-| `x_offset`             | `0`                           | Horizontal offset in pixels from default position |
-| `y_offset`             | `0`                           | Vertical offset in pixels from default position   |
+| `x_offset`             | `960`                         | Horizontal offset in pixels from default position |
+| `y_offset`             | `-3`                          | Vertical offset in pixels from default position   |
 | `start_hidden`         | `false`                       | If true, start with bar hidden                    |
 
 Example:
