@@ -11,16 +11,12 @@ space changes, and respects PaperWM's tiling order in real time.
 
 ## Install
 
+INSTALL THIS FIRST https://github.com/mogenson/PaperWM.spoon
+
 Clone to your Hammerspoon Spoons directory:
 
 ```sh
-git clone https://github.com/.../PaperLine.spoon ~/.hammerspoon/Spoons/PaperLine.spoon
-```
-
-Or symlink a working copy:
-
-```sh
-ln -s /Users/tnixc/Developer/PaperLine.spoon ~/.hammerspoon/Spoons/PaperLine.spoon
+git clone https://github.com/tnixc/PaperLine.spoon ~/.hammerspoon/Spoons/PaperLine.spoon
 ```
 
 ## Usage
@@ -103,7 +99,3 @@ the bar will appear on the next event (or call `PaperLine:refresh()`).
   cover the bar.
 - Icons are loaded lazily. The first time a bundle id appears the icon
   may take a moment to render.
-
-## License
-
-MIT
