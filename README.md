@@ -11,7 +11,7 @@ space changes, and respects PaperWM's tiling order in real time.
 
 ## Install
 
-INSTALL THIS FIRST https://github.com/mogenson/PaperWM.spoon
+**! INSTALL THIS FIRST** https://github.com/mogenson/PaperWM.spoon
 
 Clone to your Hammerspoon Spoons directory:
 
