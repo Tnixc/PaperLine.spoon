@@ -66,6 +66,7 @@ re-read them on the next redraw.
 | `x_offset`             | `960`                         | Horizontal offset in pixels from default position |
 | `y_offset`             | `-3`                          | Vertical offset in pixels from default position   |
 | `start_hidden`         | `false`                       | If true, start with bar hidden                    |
+| `per_screen`           | `{}`                          | Per-monitor config overrides (see below)          |
 
 Example:
 
@@ -75,6 +76,33 @@ PaperLine.icon_size = 18
 PaperLine.x_offset = 100    -- 100px from the left edge
 PaperLine.y_offset = -4     -- 4px above the default position
 PaperLine.bg_color = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0.75 }
+PaperLine:start()
+```
+
+### Per-monitor configuration
+
+`per_screen` maps a screen identifier to a table of config overrides. Any of
+the keys above may be overridden per monitor; anything you don't specify falls
+back to the top-level value. This is useful when, for example, an external
+display sits at a different horizontal offset than your built-in screen, or you
+want larger icons on a high-resolution monitor.
+
+The screen identifier is matched, in order, against:
+
+1. the screen's UUID (`hs.screen:getUUID()`),
+2. its name (`hs.screen:name()`),
+3. its numeric id as a string (`tostring(hs.screen:id())`).
+
+Prefer UUID or name — both are stable across reboots, whereas numeric ids are
+not. Run `hs.fnutils.map(hs.screen.allScreens(), function(s) return { s:name(), s:getUUID() } end)`
+in the Hammerspoon console to list your screens.
+
+```lua
+PaperLine.icon_size = 25         -- default for screens not listed below
+PaperLine.per_screen = {
+    ["Built-in Retina Display"] = { icon_size = 18, height = 32, x_offset = 600 },
+    ["LG UltraFine"]            = { icon_size = 32, y_offset = 0 },
+}
 PaperLine:start()
 ```
 

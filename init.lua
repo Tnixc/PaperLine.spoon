@@ -33,7 +33,25 @@
 --- - `PaperLine.x_offset`           horizontal offset in pixels from default position (default: 960)
 --- - `PaperLine.y_offset`           vertical offset in pixels from default position (default: -3)
 --- - `PaperLine.start_hidden`       start with bar hidden (default: false)
+--- - `PaperLine.per_screen`         per-monitor config overrides (default: `{}`, see below)
 --- - `PaperLine.paperwm_source_fn`  override the PaperWM source for tests (see below)
+---
+--- # Per-monitor configuration
+---
+--- `PaperLine.per_screen` maps a screen identifier to a table of config
+--- overrides. Any of the fields above may be overridden per monitor; an
+--- unspecified field falls back to the top-level default. The screen
+--- identifier is matched, in order, against the screen's UUID
+--- (`hs.screen:getUUID()`), its name (`hs.screen:name()`), and finally its
+--- numeric id as a string. UUID and name are stable across reboots; numeric
+--- ids are not.
+---
+--- ```lua
+--- PaperLine.per_screen = {
+---     ["Built-in Retina Display"] = { icon_size = 18, height = 32, x_offset = 600 },
+---     ["LG UltraFine"]            = { icon_size = 32, y_offset = 0 },
+--- }
+--- ```
 ---
 --- # Test seam
 ---
@@ -85,6 +103,9 @@ PaperLine.position = "top"
 PaperLine.x_offset = 960
 PaperLine.y_offset = -3
 PaperLine.start_hidden = false
+-- per-monitor overrides: screen identifier (UUID, name, or numeric id as
+-- string) -> table of any of the config fields above
+PaperLine.per_screen = {}
 PaperLine.default_hotkeys = {
     toggle = { { "cmd", "shift" }, "p" },
     refresh = { { "cmd", "shift" }, "r" },
@@ -127,6 +148,52 @@ end
 ---@return string
 local function position_key(cfg)
     return string.format("%s|%d|%d", cfg.position or "top", cfg.x_offset or 0, cfg.y_offset or 0)
+end
+
+-- resolve the per-monitor override table for a screen. Matches the screen's
+-- UUID, then its name, then its numeric id (as a string) against the keys of
+-- PaperLine.per_screen. Returns nil when no entry matches.
+---@param screen userdata hs.screen
+---@return table|nil
+local function screen_override(screen)
+    local overrides = PaperLine.per_screen
+    if type(overrides) ~= "table" then
+        return nil
+    end
+    local candidates = {}
+    if screen.getUUID then
+        candidates[#candidates + 1] = screen:getUUID()
+    end
+    if screen.name then
+        candidates[#candidates + 1] = screen:name()
+    end
+    candidates[#candidates + 1] = tostring(screen:id())
+    for _, key in ipairs(candidates) do
+        if key and overrides[key] then
+            return overrides[key]
+        end
+    end
+    return nil
+end
+
+-- shallow-merge a per-monitor override onto the base config. Override values
+-- win; unspecified fields fall back to the base. Returns base unchanged when
+-- there is no override.
+---@param base table
+---@param override table|nil
+---@return table
+local function merge_cfg(base, override)
+    if not override then
+        return base
+    end
+    local merged = {}
+    for k, v in pairs(base) do
+        merged[k] = v
+    end
+    for k, v in pairs(override) do
+        merged[k] = v
+    end
+    return merged
 end
 
 ---@param screen userdata hs.screen
@@ -481,6 +548,7 @@ local canvas_manager = CanvasManager.new()
 ---@param cfg table
 local function redraw_screen(screen, source, cfg)
     local sid = screen:id()
+    cfg = merge_cfg(cfg, screen_override(screen))
     local space = Spaces.activeSpaceOnScreen(screen)
     local items = space and collect_windows(source, space) or {}
 
