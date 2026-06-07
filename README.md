@@ -1,0 +1,106 @@
+# PaperLine.spoon
+
+A Hammerspoon spoon that draws a status bar at the top of the screen with the
+app icons of your currently focused PaperWM windows, in the same order as
+`PaperWM.state.windowList(space)` — left-to-right across columns, top-to-bottom
+within each column.
+
+The focused window's icon is highlighted with a border, and clicking an icon
+focuses that window. The bar appears on every screen, follows Mission Control
+space changes, and respects PaperWM's tiling order in real time.
+
+## Install
+
+Clone to your Hammerspoon Spoons directory:
+
+```sh
+git clone https://github.com/.../PaperLine.spoon ~/.hammerspoon/Spoons/PaperLine.spoon
+```
+
+Or symlink a working copy:
+
+```sh
+ln -s /Users/tnixc/Developer/PaperLine.spoon ~/.hammerspoon/Spoons/PaperLine.spoon
+```
+
+## Usage
+
+PaperLine depends on PaperWM.spoon. Load PaperWM first, then PaperLine:
+
+```lua
+PaperWM = hs.loadSpoon("PaperWM")
+PaperWM:start()
+
+PaperLine = hs.loadSpoon("PaperLine")
+PaperLine:start()
+```
+
+## Hotkeys
+
+```lua
+PaperLine:bindHotkeys({
+    toggle  = { { "cmd", "shift" }, "p" },
+    refresh = { { "cmd", "shift" }, "r" },
+})
+```
+
+`PaperLine:toggle()` is also exposed for binding to other gestures or menubar
+items.
+
+## Configuration
+
+Set these on the `PaperLine` module before or after `:start()`. The bar will
+re-read them on the next redraw.
+
+| Key                    | Default                       | Description                                       |
+| ---------------------- | ----------------------------- | ------------------------------------------------- |
+| `height`               | `32`                          | Bar height in pixels                              |
+| `icon_size`            | `22`                          | Icon size in pixels                               |
+| `icon_padding`         | `6`                           | Gap between icons (also left/right edge padding)  |
+| `bg_color`             | translucent black             | Bar background color table                        |
+| `active_color`         | orange                        | Border color for the focused window's icon        |
+| `inactive_alpha`       | `0.7`                         | Alpha for non-focused icons                       |
+| `max_icons`            | `nil`                         | Max icons to draw; `nil` = all                    |
+| `click_to_focus`       | `true`                        | Click an icon to focus that window                |
+| `show_on_all_screens`  | `true`                        | Show on every screen                              |
+| `position`             | `"below_menubar"`             | `"below_menubar"` or `"top"` (overlays menubar)   |
+| `start_hidden`         | `false`                       | If true, start with bar hidden                    |
+
+Example:
+
+```lua
+PaperLine.height = 28
+PaperLine.icon_size = 18
+PaperLine.position = "top"  -- overlay the system menu bar
+PaperLine.bg_color = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0.75 }
+PaperLine:start()
+```
+
+## How it works
+
+PaperLine subscribes to window, space, screen, and app events, and on each
+change queries `PaperWM.state.windowList(space)` for the active space on each
+screen. The result is drawn into a per-screen `hs.canvas` that sits just
+below the system menu bar at `hs.canvas.windowLevels.status` (floating, on
+all spaces, above the menubar).
+
+Icons are loaded once per (bundle id, size) via `hs.image.imageFromAppBundle`
+and cached in memory. Clicks on icons call `window:focus()` on the
+corresponding PaperWM-tracked window.
+
+If PaperWM isn't loaded, the bar is hidden with a warning. Start PaperWM and
+the bar will appear on the next event (or call `PaperLine:refresh()`).
+
+## Limitations
+
+- The bar's content is driven by PaperWM's window list. Windows that are
+  floating (per `PaperWM.floating.isFloating`) are not shown.
+- Visibility in fullscreen apps follows macOS's normal window layering. Apps
+  that aggressively hide other windows (some games, fullscreen video) may
+  cover the bar.
+- Icons are loaded lazily. The first time a bundle id appears the icon
+  may take a moment to render.
+
+## License
+
+MIT
