@@ -20,12 +20,12 @@
 ---
 --- Set these on the `PaperLine` module before or after `:start()`:
 ---
---- - `PaperLine.height`             bar height in pixels (default: 32)
---- - `PaperLine.icon_size`          icon size in pixels (default: 22)
---- - `PaperLine.icon_padding`       gap between icons (default: 6)
+--- - `PaperLine.height`             bar height in pixels (default: 48)
+--- - `PaperLine.icon_size`          icon size in pixels (default: 25)
+--- - `PaperLine.icon_padding`       gap between icons (default: 8)
 --- - `PaperLine.bg_color`           bar background color table
 --- - `PaperLine.active_color`       highlight color for the focused window's icon
---- - `PaperLine.inactive_alpha`     alpha for non-focused icons (default: 0.7)
+--- - `PaperLine.inactive_alpha`     alpha for non-focused icons (default: 1)
 --- - `PaperLine.max_icons`          max icons to draw; `nil` = all
 --- - `PaperLine.click_to_focus`     clicking an icon focuses that window (default: true)
 --- - `PaperLine.show_on_all_screens` show on every screen (default: true)
@@ -33,6 +33,15 @@
 --- - `PaperLine.x_offset`           horizontal offset in pixels from default position (default: 0)
 --- - `PaperLine.y_offset`           vertical offset in pixels from default position (default: 0)
 --- - `PaperLine.start_hidden`       start with bar hidden (default: false)
+--- - `PaperLine.paperwm_source_fn`  override the PaperWM source for tests (see below)
+---
+--- # Test seam
+---
+--- `PaperLine.paperwm_source_fn` is the only seam exposed for testing. It
+--- defaults to a function that loads PaperWM via `hs.loadSpoon` and returns a
+--- source with `:windowList(space) → items`. Tests can override it to return a
+--- fake source that responds to the same method. The fake adapter is the
+--- second adapter that turns the seam from hypothetical to real.
 ---
 --- # Hotkeys
 ---
@@ -67,7 +76,7 @@ PaperLine.height = 48
 PaperLine.icon_size = 25
 PaperLine.icon_padding = 8
 PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
-PaperLine.active_color = { red = 1, green = 0.55, blue = 0.10, alpha = 0.95 }
+PaperLine.active_color = { red = 1, green = 1, blue = 1, alpha = 0.75 }
 PaperLine.inactive_alpha = 1
 PaperLine.max_icons = nil
 PaperLine.click_to_focus = true
@@ -81,104 +90,115 @@ PaperLine.default_hotkeys = {
     refresh = { { "cmd", "shift" }, "r" },
 }
 
--- internal state
-local canvas_per_screen = {}     -- [screen_id:number] = canvas
-local canvas_position_key = {}   -- [screen_id:number] = string identifying position config
-local last_items = {}           -- [screen_id:number] = items table (for click-to-focus)
-local icon_cache = {}           -- [bundle_id@size] = hs.image
-local refresh_timer = nil
+-- =====================================================================
+-- ADAPTERS / SHIMS
+-- =====================================================================
+
+-- module-level state
 local is_started = false
 local is_visible = true
+local refresh_timer = nil
 local window_filter = nil
 local screen_watcher = nil
 local space_watcher = nil
 local app_watcher = nil
+local icon_cache = {}
 
----compute a stable key for the current position-affecting config
+-- (4) config snapshot — read once at :redraw entry, threaded downstream
+local function read_cfg()
+    return {
+        height = PaperLine.height,
+        icon_size = PaperLine.icon_size,
+        icon_padding = PaperLine.icon_padding,
+        bg_color = PaperLine.bg_color,
+        active_color = PaperLine.active_color,
+        inactive_alpha = PaperLine.inactive_alpha,
+        max_icons = PaperLine.max_icons,
+        click_to_focus = PaperLine.click_to_focus,
+        show_on_all_screens = PaperLine.show_on_all_screens,
+        position = PaperLine.position,
+        x_offset = PaperLine.x_offset,
+        y_offset = PaperLine.y_offset,
+    }
+end
+
+-- compute a stable key for the current position-affecting config
+---@param cfg table
 ---@return string
-local function position_key()
-    return string.format("%s|%d|%d",
-        PaperLine.position or "top",
-        PaperLine.x_offset or 0,
-        PaperLine.y_offset or 0)
+local function position_key(cfg)
+    return string.format("%s|%d|%d", cfg.position or "top", cfg.x_offset or 0, cfg.y_offset or 0)
 end
 
----find the loaded PaperWM module (returns nil if not loaded)
----@return table|nil
-local function get_paperwm()
-    local ok, mod = pcall(hs.loadSpoon, "PaperWM")
-    if not ok or not mod then return nil end
-    return mod
+---@param screen userdata hs.screen
+---@return userdata hs.geometry.rect
+local function full_frame(screen)
+    if screen.fullFrame then
+        return screen:fullFrame()
+    end
+    return screen:frame()
 end
 
----get an app icon, cached by (bundle id, size)
+---@param screen userdata hs.screen
+---@return userdata hs.geometry.rect
+local function visible_frame(screen)
+    if screen.visibleFrame then
+        return screen:visibleFrame()
+    end
+    return screen:frame()
+end
+
+-- icon source — memoised per (bundle id, size)
 ---@param bundle_id string|nil
 ---@param size number
 ---@return userdata|nil hs.image
 local function cached_icon(bundle_id, size)
-    if not bundle_id or bundle_id == "" then return nil end
+    if not bundle_id or bundle_id == "" then
+        return nil
+    end
     local key = bundle_id .. "@" .. size
-    if icon_cache[key] then return icon_cache[key] end
-    if not (Image and Image.imageFromAppBundle) then return nil end
+    if icon_cache[key] then
+        return icon_cache[key]
+    end
+    if not (Image and Image.imageFromAppBundle) then
+        return nil
+    end
     local img = Image.imageFromAppBundle(bundle_id)
-    if not img then return nil end
-    if img.setSize then img = img:setSize({ w = size, h = size }) end
+    if not img then
+        return nil
+    end
+    if img.setSize then
+        img = img:setSize({ w = size, h = size })
+    end
     icon_cache[key] = img
     return img
 end
 
----collect windows in PaperWM order for a space
----@param paperwm table
----@param space number
----@return table[] items: { window, app, bundle_id, title, space, col, row }
-local function collect_windows(paperwm, space)
-    local out = {}
-    if not paperwm or not space then return out end
-    local list = paperwm.state.windowList(space)
-    if not list then return out end
-    for col, rows in ipairs(list) do
-        for row, w in ipairs(rows) do
-            local app = w:application()
-            table.insert(out, {
-                window = w,
-                app = app,
-                bundle_id = app and app:bundleID() or nil,
-                title = w:title(),
-                space = space,
-                col = col,
-                row = row,
-            })
-        end
+-- (3) PaperWM source — real seam. The default adapter wraps the live module;
+-- tests can override PaperLine.paperwm_source_fn to plug in a fake.
+local function default_paperwm_source()
+    local ok, mod = pcall(hs.loadSpoon, "PaperWM")
+    if not ok or not mod then
+        return nil
     end
-    return out
+    return {
+        windowList = function(_, space)
+            return mod.state.windowList(space)
+        end,
+    }
 end
+PaperLine.paperwm_source_fn = default_paperwm_source
 
----return the full screen frame, including the menubar/dock area
----compatible with both old (frame = full) and new (fullFrame = full) Hammerspoon
+-- canvas factory — produces a configured hs.canvas with click handler wired
 ---@param screen userdata hs.screen
----@return userdata hs.geometry.rect
-local function full_frame(screen)
-    if screen.fullFrame then return screen:fullFrame() end
-    return screen:frame()
-end
-
----return the visible screen frame, excluding the menubar/dock area
----compatible with both old (visibleFrame = visible) and new (frame = visible) Hammerspoon
----@param screen userdata hs.screen
----@return userdata hs.geometry.rect
-local function visible_frame(screen)
-    if screen.visibleFrame then return screen:visibleFrame() end
-    return screen:frame()
-end
-
----create a new canvas for a screen and wire up its click handler
----@param screen userdata hs.screen
+---@param cfg table
+---@param click_to_focus_getter fun(): boolean
+---@param on_click fun(id: string)
 ---@return userdata canvas
-local function make_canvas(screen)
+local function make_canvas(screen, cfg, click_to_focus_getter, on_click)
     local visible = visible_frame(screen)
     local full = full_frame(screen)
     local base_x, base_y
-    if PaperLine.position == "top" then
+    if cfg.position == "top" then
         base_x = full.x
         base_y = full.y
     else
@@ -186,10 +206,10 @@ local function make_canvas(screen)
         base_y = visible.y
     end
     local c = Canvas.new({
-        x = base_x + (PaperLine.x_offset or 0),
-        y = base_y + (PaperLine.y_offset or 0),
+        x = base_x + (cfg.x_offset or 0),
+        y = base_y + (cfg.y_offset or 0),
         w = visible.w,
-        h = PaperLine.height,
+        h = cfg.height,
     })
     c:behavior({
         hs.canvas.windowBehaviors.canJoinAllSpaces,
@@ -197,181 +217,314 @@ local function make_canvas(screen)
         hs.canvas.windowBehaviors.ignoresCycle,
     })
     c:level(Canvas.windowLevels.status)
-    c:mouseCallback(function(canvas, event, id, _)
-        if event == "mouseUp" and PaperLine.click_to_focus and type(id) == "string" then
-            local prefix, idx_str = id:match("^(icon_)(%d+)$")
-            if prefix then
-                local idx = tonumber(idx_str)
-                local items = last_items[screen:id()]
-                if items and idx and idx >= 1 and idx <= #items then
-                    local target = items[idx]
-                    if target and target.window then target.window:focus() end
-                end
-            end
+    c:mouseCallback(function(_canvas, event, id, _)
+        if event == "mouseUp" and click_to_focus_getter() and type(id) == "string" then
+            on_click(id)
         end
     end)
     return c
 end
 
----build the canvas element list for a set of items
+-- =====================================================================
+-- (1) LAYOUT
+-- =====================================================================
+
+-- (1a) layout_slots — pure-ish, data-in / data-out.
+-- Walks items in PaperWM order, decides per-item geometry, and emits a list
+-- of project-specific "slots". No canvas DSL knowledge lives here.
 ---@param items table[]
 ---@param focused_id number|nil
 ---@param canvas_w number
----@return table[] elements
-local function build_elements(items, focused_id, canvas_w)
-    local elements = {}
-
-    table.insert(elements, {
-        type = "rectangle",
-        fillColor = PaperLine.bg_color,
-        strokeColor = { red = 0, green = 0, blue = 0, alpha = 0 },
-        frame = { x = 0, y = 0, w = canvas_w, h = PaperLine.height },
-    })
-
-    local x_cursor = PaperLine.icon_padding
-    local y_icon = math.floor((PaperLine.height - PaperLine.icon_size) / 2)
-    local limit = PaperLine.max_icons and math.min(#items, PaperLine.max_icons) or #items
-
+---@param cfg table
+---@param icon_resolver fun(bundle_id: string|nil, size: number): userdata|nil
+---@return table[]
+local function layout_slots(items, focused_id, canvas_w, cfg, icon_resolver)
+    local slots = {}
+    slots[#slots + 1] = { kind = "background", x = 0, y = 0, w = canvas_w, h = cfg.height }
+    local x_cursor = cfg.icon_padding
+    local y_icon = math.floor((cfg.height - cfg.icon_size) / 2)
+    local limit = cfg.max_icons and math.min(#items, cfg.max_icons) or #items
     for i = 1, limit do
         local item = items[i]
         local is_focused = focused_id and item.window and item.window:id() == focused_id
-
         if is_focused then
-            table.insert(elements, {
-                type = "rectangle",
-                fillColor = { red = 0, green = 0, blue = 0, alpha = 0 },
-                strokeColor = PaperLine.active_color,
-                strokeWidth = 2,
-                roundedRectRadii = { xRadius = 6, yRadius = 6 },
-                frame = {
-                    x = x_cursor - 0.5,
-                    y = y_icon - 0.5,
-                    w = PaperLine.icon_size + 1,
-                    h = PaperLine.icon_size + 1,
-                },
-            })
+            slots[#slots + 1] = {
+                kind = "focusRing",
+                x = x_cursor - 0.5,
+                y = y_icon - 0.5,
+                w = cfg.icon_size + 1,
+                h = cfg.icon_size + 1,
+            }
         end
-
-        local icon = cached_icon(item.bundle_id, PaperLine.icon_size)
+        local icon = icon_resolver(item.bundle_id, cfg.icon_size)
         if icon then
-            table.insert(elements, {
-                type = "image",
+            slots[#slots + 1] = {
+                kind = "icon",
+                x = x_cursor,
+                y = y_icon,
+                w = cfg.icon_size,
+                h = cfg.icon_size,
                 image = icon,
-                frame = {
-                    x = x_cursor,
-                    y = y_icon,
-                    w = PaperLine.icon_size,
-                    h = PaperLine.icon_size,
-                },
-                imageAlpha = is_focused and 1.0 or PaperLine.inactive_alpha,
+                alpha = is_focused and 1.0 or cfg.inactive_alpha,
                 id = "icon_" .. i,
-                trackMouseUp = PaperLine.click_to_focus,
-            })
+            }
         else
             local name = (item.app and item.app:name()) or "?"
-            local letter = name:sub(1, 1):upper()
-            table.insert(elements, {
+            slots[#slots + 1] = {
+                kind = "fallback",
+                x = x_cursor,
+                y = y_icon,
+                w = cfg.icon_size,
+                h = cfg.icon_size,
+                letter = name:sub(1, 1):upper(),
+                id = "icon_" .. i,
+            }
+        end
+        x_cursor = x_cursor + cfg.icon_size + cfg.icon_padding
+    end
+    return slots
+end
+
+-- (1b) render_slots — the only place that knows the Hammerspoon canvas DSL.
+-- Flattens project-specific slots into canvas element tables.
+---@param slots table[]
+---@param cfg table
+---@return table[]
+local function render_slots(slots, cfg)
+    local elements = {}
+    for _, s in ipairs(slots) do
+        if s.kind == "background" then
+            elements[#elements + 1] = {
+                type = "rectangle",
+                fillColor = cfg.bg_color,
+                strokeColor = { red = 0, green = 0, blue = 0, alpha = 0 },
+                frame = { x = s.x, y = s.y, w = s.w, h = s.h },
+            }
+        elseif s.kind == "focusRing" then
+            elements[#elements + 1] = {
+                type = "rectangle",
+                fillColor = { red = 0, green = 0, blue = 0, alpha = 0 },
+                strokeColor = cfg.active_color,
+                strokeWidth = 1.5,
+                roundedRectRadii = { xRadius = 6, yRadius = 6 },
+                frame = { x = s.x, y = s.y, w = s.w, h = s.h },
+            }
+        elseif s.kind == "icon" then
+            elements[#elements + 1] = {
+                type = "image",
+                image = s.image,
+                frame = { x = s.x, y = s.y, w = s.w, h = s.h },
+                imageAlpha = s.alpha,
+                id = s.id,
+                trackMouseUp = cfg.click_to_focus,
+            }
+        elseif s.kind == "fallback" then
+            elements[#elements + 1] = {
                 type = "rectangle",
                 fillColor = { red = 0.25, green = 0.25, blue = 0.25, alpha = 0.8 },
-                frame = {
-                    x = x_cursor,
-                    y = y_icon,
-                    w = PaperLine.icon_size,
-                    h = PaperLine.icon_size,
-                },
-                id = "icon_" .. i,
-                trackMouseUp = PaperLine.click_to_focus,
-            })
-            table.insert(elements, {
+                frame = { x = s.x, y = s.y, w = s.w, h = s.h },
+                id = s.id,
+                trackMouseUp = cfg.click_to_focus,
+            }
+            elements[#elements + 1] = {
                 type = "text",
-                text = letter,
+                text = s.letter,
                 textColor = { white = 1, alpha = 0.9 },
-                textSize = math.floor(PaperLine.icon_size * 0.65),
+                textSize = math.floor(s.h * 0.65),
                 textAlignment = "center",
-                frame = {
-                    x = x_cursor,
-                    y = y_icon,
-                    w = PaperLine.icon_size,
-                    h = PaperLine.icon_size,
-                },
-            })
+                frame = { x = s.x, y = s.y, w = s.w, h = s.h },
+            }
         end
-
-        x_cursor = x_cursor + PaperLine.icon_size + PaperLine.icon_padding
     end
-
     return elements
 end
 
----redraw a single screen's bar
+-- transform a source's window list into the item shape the layout expects
+---@param source table|nil
+---@param space number
+---@return table[]
+local function collect_windows(source, space)
+    local out = {}
+    if not source or not space then
+        return out
+    end
+    local list = source:windowList(space)
+    if not list then
+        return out
+    end
+    for col, rows in ipairs(list) do
+        for row, w in ipairs(rows) do
+            local app = w:application()
+            out[#out + 1] = {
+                window = w,
+                app = app,
+                bundle_id = app and app:bundleID() or nil,
+                title = w:title(),
+                space = space,
+                col = col,
+                row = row,
+            }
+        end
+    end
+    return out
+end
+
+-- =====================================================================
+-- (2) CANVAS MANAGER — owns the three per-screen maps
+-- =====================================================================
+
+local CanvasManager = {}
+CanvasManager.__index = CanvasManager
+
+function CanvasManager.new()
+    return setmetatable({ _canvas = {}, _key = {}, _items = {} }, CanvasManager)
+end
+
+-- ensure a canvas exists for `screen`, recreating it when position config
+-- changed since the last build. The click routing is wired at creation.
 ---@param screen userdata hs.screen
----@param paperwm table|nil
-local function redraw_screen(screen, paperwm)
+---@param cfg table
+---@return userdata canvas
+function CanvasManager:get_or_create(screen, cfg)
+    local sid = screen:id()
+    local key = position_key(cfg)
+    local canvas = self._canvas[sid]
+    if canvas and self._key[sid] == key then
+        return canvas
+    end
+    if canvas then
+        canvas:delete()
+    end
+    local mgr = self
+    canvas = make_canvas(screen, cfg, function()
+        return PaperLine.click_to_focus
+    end, function(id)
+        local prefix, idx_str = id:match("^(icon_)(%d+)$")
+        if not prefix then
+            return
+        end
+        local idx = tonumber(idx_str)
+        local items = mgr._items[sid]
+        if items and idx and idx >= 1 and idx <= #items then
+            local target = items[idx]
+            if target and target.window then
+                target.window:focus()
+            end
+        end
+    end)
+    self._canvas[sid] = canvas
+    self._key[sid] = key
+    return canvas
+end
+
+-- render new elements on the screen's canvas, persist items for click routing
+---@param screen userdata hs.screen
+---@param items table[]
+---@param elements table[]
+---@param cfg table
+function CanvasManager:show_with(screen, items, elements, cfg)
+    local canvas = self:get_or_create(screen, cfg)
+    canvas:replaceElements(elements)
+    canvas:show()
+    self._items[screen:id()] = items
+end
+
+---@param sid number
+function CanvasManager:evict_screen(sid)
+    if self._canvas[sid] then
+        self._canvas[sid]:delete()
+        self._canvas[sid] = nil
+        self._key[sid] = nil
+        self._items[sid] = nil
+    end
+end
+
+function CanvasManager:evict_all()
+    for sid in pairs(self._canvas) do
+        self:evict_screen(sid)
+    end
+end
+
+---@param alive_sids table number → true
+function CanvasManager:gc_to(alive_sids)
+    for sid in pairs(self._canvas) do
+        if not alive_sids[sid] then
+            self:evict_screen(sid)
+        end
+    end
+end
+
+---@param sid number
+---@return table[]|nil
+function CanvasManager:items_for(sid)
+    return self._items[sid]
+end
+
+-- exposed for :dump
+---@return table
+function CanvasManager:all_items()
+    return self._items
+end
+
+-- =====================================================================
+-- INSTANCE
+-- =====================================================================
+
+local canvas_manager = CanvasManager.new()
+
+-- =====================================================================
+-- PAPERLINE METHODS
+-- =====================================================================
+
+---@param screen userdata hs.screen
+---@param source table
+---@param cfg table
+local function redraw_screen(screen, source, cfg)
     local sid = screen:id()
     local space = Spaces.activeSpaceOnScreen(screen)
-    local items = paperwm and space and collect_windows(paperwm, space) or {}
+    local items = space and collect_windows(source, space) or {}
 
     if #items == 0 or not is_visible then
-        if canvas_per_screen[sid] then
-            canvas_per_screen[sid]:delete()
-            canvas_per_screen[sid] = nil
-        end
-        canvas_position_key[sid] = nil
-        last_items[sid] = nil
+        canvas_manager:evict_screen(sid)
         return
     end
 
     local focused_window = Window.focusedWindow()
     local focused_id = focused_window and focused_window:id() or nil
 
-    local canvas = canvas_per_screen[sid]
-    local key = position_key()
-    if not canvas or canvas_position_key[sid] ~= key then
-        if canvas then canvas:delete() end
-        canvas = make_canvas(screen)
-        canvas_per_screen[sid] = canvas
-        canvas_position_key[sid] = key
-    end
-
-    local canvas_w = canvas:frame().w
-    canvas:replaceElements(build_elements(items, focused_id, canvas_w))
-    canvas:show()
-    last_items[sid] = items
+    local canvas_w = visible_frame(screen).w
+    local slots = layout_slots(items, focused_id, canvas_w, cfg, cached_icon)
+    local elements = render_slots(slots, cfg)
+    canvas_manager:show_with(screen, items, elements, cfg)
 end
 
 ---redraw the bar on all configured screens
 function PaperLine:redraw()
-    if not is_started then return end
-    local paperwm = get_paperwm()
-    if not paperwm then
-        for sid, canvas in pairs(canvas_per_screen) do
-            canvas:delete()
-            canvas_per_screen[sid] = nil
-        end
-        last_items = {}
+    if not is_started then
+        return
+    end
+    local cfg = read_cfg()
+    local source = PaperLine.paperwm_source_fn and PaperLine.paperwm_source_fn() or nil
+    if not source then
+        canvas_manager:evict_all()
         self.logger.w("PaperWM.spoon not loaded — PaperLine bar will be empty")
         return
     end
 
-    local screens = PaperLine.show_on_all_screens and Screen.allScreens() or { Screen.mainScreen() }
+    local screens = cfg.show_on_all_screens and Screen.allScreens() or { Screen.mainScreen() }
     local alive = {}
     for _, screen in ipairs(screens) do
         alive[screen:id()] = true
-        redraw_screen(screen, paperwm)
+        redraw_screen(screen, source, cfg)
     end
-    for sid, canvas in pairs(canvas_per_screen) do
-        if not alive[sid] then
-            canvas:delete()
-            canvas_per_screen[sid] = nil
-            canvas_position_key[sid] = nil
-            last_items[sid] = nil
-        end
-    end
+    canvas_manager:gc_to(alive)
 end
 
 ---debounced redraw — coalesces bursts of events into one repaint
 function PaperLine:refresh()
-    if refresh_timer and refresh_timer:running() then return end
+    if refresh_timer and refresh_timer:running() then
+        return
+    end
     refresh_timer = Timer.doAfter(0.05, function()
         refresh_timer = nil
         self:redraw()
@@ -381,7 +534,9 @@ end
 ---start watching for window, space, screen, and app events
 ---@return PaperLine
 function PaperLine:start()
-    if is_started then return self end
+    if is_started then
+        return self
+    end
     is_started = true
     is_visible = not PaperLine.start_hidden
 
@@ -393,11 +548,25 @@ function PaperLine:start()
         WindowFilter.windowFocused,
         WindowFilter.windowFullscreened,
         WindowFilter.windowUnfullscreened,
-    }, function() PaperLine:refresh() end)
+    }, function()
+        PaperLine:refresh()
+    end)
 
-    screen_watcher = Screen.watcher.new(function() PaperLine:refresh() end):start()
-    space_watcher = Spaces.watcher.new(function() PaperLine:refresh() end):start()
-    app_watcher = hs.application.watcher.new(function() PaperLine:refresh() end):start()
+    screen_watcher = Screen.watcher
+        .new(function()
+            PaperLine:refresh()
+        end)
+        :start()
+    space_watcher = Spaces.watcher
+        .new(function()
+            PaperLine:refresh()
+        end)
+        :start()
+    app_watcher = hs.application.watcher
+        .new(function()
+            PaperLine:refresh()
+        end)
+        :start()
 
     self:redraw()
     return self
@@ -406,18 +575,27 @@ end
 ---stop watching for events and hide the bar
 ---@return PaperLine
 function PaperLine:stop()
-    if not is_started then return self end
-    is_started = false
-    if window_filter then window_filter:unsubscribeAll() window_filter = nil end
-    if screen_watcher then screen_watcher:stop() screen_watcher = nil end
-    if space_watcher then space_watcher:stop() space_watcher = nil end
-    if app_watcher then app_watcher:stop() app_watcher = nil end
-    for sid, canvas in pairs(canvas_per_screen) do
-        canvas:delete()
-        canvas_per_screen[sid] = nil
-        canvas_position_key[sid] = nil
+    if not is_started then
+        return self
     end
-    last_items = {}
+    is_started = false
+    if window_filter then
+        window_filter:unsubscribeAll()
+        window_filter = nil
+    end
+    if screen_watcher then
+        screen_watcher:stop()
+        screen_watcher = nil
+    end
+    if space_watcher then
+        space_watcher:stop()
+        space_watcher = nil
+    end
+    if app_watcher then
+        app_watcher:stop()
+        app_watcher = nil
+    end
+    canvas_manager:evict_all()
     return self
 end
 
@@ -427,11 +605,7 @@ function PaperLine:toggle()
     if is_visible then
         self:redraw()
     else
-        for sid, canvas in pairs(canvas_per_screen) do
-            canvas:delete()
-            canvas_per_screen[sid] = nil
-            canvas_position_key[sid] = nil
-        end
+        canvas_manager:evict_all()
     end
 end
 
@@ -439,8 +613,12 @@ end
 ---@param mapping table action name -> hotkey table
 function PaperLine:bindHotkeys(mapping)
     local actions = {
-        toggle = function() self:toggle() end,
-        refresh = function() self:refresh() end,
+        toggle = function()
+            self:toggle()
+        end,
+        refresh = function()
+            self:refresh()
+        end,
     }
     for name, key in pairs(mapping or {}) do
         if actions[name] then
@@ -451,17 +629,30 @@ end
 
 ---print the current internal state for debugging
 function PaperLine:dump()
+    local function count(t)
+        local n = 0
+        for _ in pairs(t) do
+            n = n + 1
+        end
+        return n
+    end
     print("--- PaperLine State ---")
     print(string.format("is_started: %s", tostring(is_started)))
     print(string.format("is_visible: %s", tostring(is_visible)))
-    print(string.format("cached icons: %d", (function() local n=0 for _ in pairs(icon_cache) do n=n+1 end return n end)()))
-    for sid, items in pairs(last_items) do
+    print(string.format("cached icons: %d", count(icon_cache)))
+    for sid, items in pairs(canvas_manager:all_items()) do
         print(string.format("screen %d items (%d):", sid, #items))
         for i, item in ipairs(items) do
-            print(string.format("  [%d] c%d r%d %s — %s",
-                i, item.col, item.row,
-                item.app and item.app:name() or "?",
-                item.title))
+            print(
+                string.format(
+                    "  [%d] c%d r%d %s — %s",
+                    i,
+                    item.col,
+                    item.row,
+                    item.app and item.app:name() or "?",
+                    item.title
+                )
+            )
         end
     end
     print("-----------------------")
