@@ -108,7 +108,7 @@ PaperLine.logger = Logger.new(PaperLine.name)
 PaperLine.height = 48
 PaperLine.icon_size = 25
 PaperLine.icon_padding = 8
-PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0.2 }
+PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
 PaperLine.active_color = { red = 1, green = 1, blue = 1, alpha = 0.75 }
 PaperLine.inactive_alpha = 1
 PaperLine.max_icons = nil
