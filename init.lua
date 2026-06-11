@@ -1,8 +1,10 @@
 --- === PaperLine.spoon ===
 ---
---- A status bar that displays PaperWM's window ordering as a row of app
---- icons at the top of the screen. Mirrors `PaperWM.state.windowList(space)`
---- — left-to-right across columns, top-to-bottom within each column.
+--- A menu bar item that displays PaperWM's window ordering as a row of app
+--- icons. Mirrors `PaperWM.state.windowList(space)` — left-to-right across
+--- columns, top-to-bottom within each column — and renders the row as a single
+--- composited image in the system menu bar. Clicking the item drops down a menu
+--- listing every window so you can jump straight to one.
 ---
 --- # Usage
 ---
@@ -20,31 +22,32 @@
 ---
 --- Set these on the `PaperLine` module before or after `:start()`:
 ---
---- - `PaperLine.height`             bar height in pixels (default: 48)
---- - `PaperLine.icon_size`          icon size in pixels (default: 25)
---- - `PaperLine.icon_padding`       gap between icons (default: 8)
---- - `PaperLine.bg_color`           bar background color table (default: fully transparent)
---- - `PaperLine.active_color`       highlight color for the focused window's icon (default: white @ 0.75 alpha)
---- - `PaperLine.inactive_alpha`     alpha for non-focused icons (default: 1)
---- - `PaperLine.max_icons`          max icons to draw; `nil` = all
---- - `PaperLine.click_to_focus`     clicking an icon focuses that window (default: true)
---- - `PaperLine.show_on_all_screens` show on every screen (default: true)
---- - `PaperLine.position`           "top" (default, overlays menubar) or "below_menubar"
---- - `PaperLine.x_offset`           horizontal offset in pixels from default position (default: 960)
---- - `PaperLine.y_offset`           vertical offset in pixels from default position (default: -3)
---- - `PaperLine.start_hidden`       start with bar hidden (default: false)
---- - `PaperLine.per_screen`         per-monitor config overrides (default: `{}`, see below)
---- - `PaperLine.paperwm_source_fn`  override the PaperWM source for tests (see below)
+--- - `PaperLine.height`         image height in pixels (default: 22, menu-bar sized)
+--- - `PaperLine.icon_size`      icon size in pixels (default: 18)
+--- - `PaperLine.icon_padding`   gap between icons (default: 3)
+--- - `PaperLine.bg_color`       image background color table (default: fully transparent)
+--- - `PaperLine.active_color`   highlight color for the focused window's icon (default: white @ 0.75 alpha)
+--- - `PaperLine.inactive_alpha` alpha for non-focused icons (default: 1)
+--- - `PaperLine.max_icons`      max icons to draw; `nil` = all
+--- - `PaperLine.menu_icon_size` icon size in the dropdown menu (default: 16)
+--- - `PaperLine.click_to_focus` clicking a menu entry focuses that window (default: true)
+--- - `PaperLine.show_titles`    show window titles next to app names in the menu (default: true)
+--- - `PaperLine.screen`         which screen's windows to mirror; `nil` = main screen (see below)
+--- - `PaperLine.autosave_name`  menu bar autosave name so macOS restores position (default: "PaperLine")
+--- - `PaperLine.start_hidden`   start with the item hidden (default: false)
+--- - `PaperLine.paperwm_source_fn` override the PaperWM source for tests (see below)
 ---
---- # Per-monitor configuration
+--- # Choosing a screen
 ---
---- `PaperLine.per_screen` maps a screen identifier to a table of config
---- overrides. Any of the fields above may be overridden per monitor; an
---- unspecified field falls back to the top-level default. The screen
---- identifier is matched, in order, against the screen's UUID
+--- The system menu bar is a single, global UI element, so PaperLine cannot draw a
+--- different row per display. Instead, it mirrors the windows of one screen's
+--- active space. By default that is the main screen (`hs.screen.mainScreen()`).
+---
+--- To pin it to a specific display, set `PaperLine.screen` to a screen
+--- identifier. The value is matched, in order, against the screen's UUID
 --- (`hs.screen:getUUID()`), its name (`hs.screen:name()`), and finally its
---- numeric id as a string. UUID and name are stable across reboots; numeric
---- ids are not.
+--- numeric id as a string. UUID and name are stable across reboots; numeric ids
+--- are not.
 ---
 --- Run this in the Hammerspoon console to list your screens:
 ---
@@ -54,18 +57,8 @@
 --- end
 --- ```
 ---
---- Example output:
----
---- ```
----   [1] Built-in Retina Display  (UUID: 37D8832A-2D66-02CA-B9F7-8F30A301B230)
----   [2] GF270M                   (UUID: A127AC03-26F1-452E-A399-51B091E616F7)
---- ```
----
 --- ```lua
---- PaperLine.per_screen = {
----     ["Built-in Retina Display"] = { icon_size = 18, height = 32, x_offset = 600 },
----     ["LG UltraFine"]            = { icon_size = 32, y_offset = 0 },
---- }
+--- PaperLine.screen = "Built-in Retina Display"
 --- ```
 ---
 --- # Test seam
@@ -73,8 +66,7 @@
 --- `PaperLine.paperwm_source_fn` is the only seam exposed for testing. It
 --- defaults to a function that loads PaperWM via `hs.loadSpoon` and returns a
 --- source with `:windowList(space) → items`. Tests can override it to return a
---- fake source that responds to the same method. The fake adapter is the
---- second adapter that turns the seam from hypothetical to real.
+--- fake source that responds to the same method.
 ---
 --- # Hotkeys
 ---
@@ -85,6 +77,7 @@
 --- })
 --- ```
 local Canvas <const> = hs.canvas
+local Menubar <const> = hs.menubar
 local Screen <const> = hs.screen
 local Spaces <const> = hs.spaces
 local Timer <const> = hs.timer
@@ -97,7 +90,7 @@ local PaperLine = {}
 PaperLine.__index = PaperLine
 
 PaperLine.name = "PaperLine"
-PaperLine.version = "1.0"
+PaperLine.version = "2.0"
 PaperLine.author = "tnixc"
 PaperLine.license = "MIT"
 PaperLine.homepage = "https://github.com/.../PaperLine.spoon"
@@ -105,22 +98,21 @@ PaperLine.homepage = "https://github.com/.../PaperLine.spoon"
 PaperLine.logger = Logger.new(PaperLine.name)
 
 -- configuration with sensible defaults
-PaperLine.height = 48
-PaperLine.icon_size = 25
-PaperLine.icon_padding = 8
+PaperLine.height = 22
+PaperLine.icon_size = 18
+PaperLine.icon_padding = 3
 PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
 PaperLine.active_color = { red = 1, green = 1, blue = 1, alpha = 0.75 }
 PaperLine.inactive_alpha = 1
 PaperLine.max_icons = nil
+PaperLine.menu_icon_size = 16
 PaperLine.click_to_focus = true
-PaperLine.show_on_all_screens = true
-PaperLine.position = "top"
-PaperLine.x_offset = 960
-PaperLine.y_offset = -3
+PaperLine.show_titles = true
+-- which screen's windows to mirror; nil = main screen. May be a UUID, name, or
+-- numeric id as a string.
+PaperLine.screen = nil
+PaperLine.autosave_name = "PaperLine"
 PaperLine.start_hidden = false
--- per-monitor overrides: screen identifier (UUID, name, or numeric id as
--- string) -> table of any of the config fields above
-PaperLine.per_screen = {}
 PaperLine.default_hotkeys = {
     toggle = { { "cmd", "shift" }, "p" },
     refresh = { { "cmd", "shift" }, "r" },
@@ -140,7 +132,7 @@ local space_watcher = nil
 local app_watcher = nil
 local icon_cache = {}
 
--- (4) config snapshot — read once at :redraw entry, threaded downstream
+-- config snapshot — read once at :redraw entry, threaded downstream
 local function read_cfg()
     return {
         height = PaperLine.height,
@@ -150,83 +142,40 @@ local function read_cfg()
         active_color = PaperLine.active_color,
         inactive_alpha = PaperLine.inactive_alpha,
         max_icons = PaperLine.max_icons,
+        menu_icon_size = PaperLine.menu_icon_size,
         click_to_focus = PaperLine.click_to_focus,
-        show_on_all_screens = PaperLine.show_on_all_screens,
-        position = PaperLine.position,
-        x_offset = PaperLine.x_offset,
-        y_offset = PaperLine.y_offset,
+        show_titles = PaperLine.show_titles,
+        screen = PaperLine.screen,
     }
 end
 
--- compute a stable key for the current position-affecting config
+-- resolve which screen to mirror. nil/"main" selects the main screen; otherwise
+-- the value is matched against each screen's UUID, name, then numeric id.
 ---@param cfg table
----@return string
-local function position_key(cfg)
-    return string.format("%s|%d|%d", cfg.position or "top", cfg.x_offset or 0, cfg.y_offset or 0)
-end
-
--- resolve the per-monitor override table for a screen. Matches the screen's
--- UUID, then its name, then its numeric id (as a string) against the keys of
--- PaperLine.per_screen. Returns nil when no entry matches.
----@param screen userdata hs.screen
----@return table|nil
-local function screen_override(screen)
-    local overrides = PaperLine.per_screen
-    if type(overrides) ~= "table" then
-        return nil
+---@return userdata|nil hs.screen
+local function resolve_screen(cfg)
+    local want = cfg.screen
+    if not want or want == "main" then
+        return Screen.mainScreen()
     end
-    local candidates = {}
-    if screen.getUUID then
-        candidates[#candidates + 1] = screen:getUUID()
-    end
-    if screen.name then
-        candidates[#candidates + 1] = screen:name()
-    end
-    candidates[#candidates + 1] = tostring(screen:id())
-    for _, key in ipairs(candidates) do
-        if key and overrides[key] then
-            return overrides[key]
+    want = tostring(want)
+    for _, screen in ipairs(Screen.allScreens()) do
+        local candidates = {}
+        if screen.getUUID then
+            candidates[#candidates + 1] = screen:getUUID()
+        end
+        if screen.name then
+            candidates[#candidates + 1] = screen:name()
+        end
+        candidates[#candidates + 1] = tostring(screen:id())
+        for _, key in ipairs(candidates) do
+            if key == want then
+                return screen
+            end
         end
     end
-    return nil
-end
-
--- shallow-merge a per-monitor override onto the base config. Override values
--- win; unspecified fields fall back to the base. Returns base unchanged when
--- there is no override.
----@param base table
----@param override table|nil
----@return table
-local function merge_cfg(base, override)
-    if not override then
-        return base
-    end
-    local merged = {}
-    for k, v in pairs(base) do
-        merged[k] = v
-    end
-    for k, v in pairs(override) do
-        merged[k] = v
-    end
-    return merged
-end
-
----@param screen userdata hs.screen
----@return userdata hs.geometry.rect
-local function full_frame(screen)
-    if screen.fullFrame then
-        return screen:fullFrame()
-    end
-    return screen:frame()
-end
-
----@param screen userdata hs.screen
----@return userdata hs.geometry.rect
-local function visible_frame(screen)
-    if screen.visibleFrame then
-        return screen:visibleFrame()
-    end
-    return screen:frame()
+    -- requested screen is not currently connected; fall back to main
+    return Screen.mainScreen()
 end
 
 -- icon source — memoised per (bundle id, size)
@@ -255,7 +204,7 @@ local function cached_icon(bundle_id, size)
     return img
 end
 
--- (3) PaperWM source — real seam. The default adapter wraps the live module;
+-- PaperWM source — real seam. The default adapter wraps the live module;
 -- tests can override PaperLine.paperwm_source_fn to plug in a fake.
 local function default_paperwm_source()
     local ok, mod = pcall(hs.loadSpoon, "PaperWM")
@@ -270,54 +219,13 @@ local function default_paperwm_source()
 end
 PaperLine.paperwm_source_fn = default_paperwm_source
 
--- canvas factory — produces a configured hs.canvas with click handler wired
----@param screen userdata hs.screen
----@param cfg table
----@param click_to_focus_getter fun(): boolean
----@param on_click fun(id: string)
----@return userdata canvas
-local function make_canvas(screen, cfg, click_to_focus_getter, on_click)
-    local visible = visible_frame(screen)
-    local full = full_frame(screen)
-    local base_x, base_y
-    if cfg.position == "top" then
-        base_x = full.x
-        base_y = full.y
-    else
-        base_x = visible.x
-        base_y = visible.y
-    end
-    local c = Canvas.new({
-        x = base_x + (cfg.x_offset or 0),
-        y = base_y + (cfg.y_offset or 0),
-        w = cfg.icon_size + cfg.icon_padding * 2,
-        h = cfg.height,
-    })
-    c:behavior({
-        hs.canvas.windowBehaviors.canJoinAllSpaces,
-        hs.canvas.windowBehaviors.stationary,
-        hs.canvas.windowBehaviors.ignoresCycle,
-    })
-    c:level(Canvas.windowLevels.status)
-    -- never steal keyboard focus / activate Hammerspoon when clicked
-    if c.clickActivating then
-        c:clickActivating(false)
-    end
-    c:mouseCallback(function(_canvas, event, id, _)
-        if event == "mouseUp" and click_to_focus_getter() and type(id) == "string" then
-            on_click(id)
-        end
-    end)
-    return c
-end
-
 -- =====================================================================
 -- (1) LAYOUT
 -- =====================================================================
 
 -- (1a) layout_slots — pure-ish, data-in / data-out.
 -- Walks items in PaperWM order, decides per-item geometry, and emits a list
--- of project-specific "slots". No canvas DSL knowledge lives here. The bar
+-- of project-specific "slots". No canvas DSL knowledge lives here. The image
 -- contracts to its content: width is the icons plus symmetric padding.
 ---@param items table[]
 ---@param focused_id number|nil
@@ -403,7 +311,6 @@ local function render_slots(slots, cfg)
                 frame = { x = s.x, y = s.y, w = s.w, h = s.h },
                 imageAlpha = s.alpha,
                 id = s.id,
-                trackMouseUp = cfg.click_to_focus,
             }
         elseif s.kind == "fallback" then
             elements[#elements + 1] = {
@@ -411,7 +318,6 @@ local function render_slots(slots, cfg)
                 fillColor = { red = 0.25, green = 0.25, blue = 0.25, alpha = 0.8 },
                 frame = { x = s.x, y = s.y, w = s.w, h = s.h },
                 id = s.id,
-                trackMouseUp = cfg.click_to_focus,
             }
             elements[#elements + 1] = {
                 type = "text",
@@ -424,6 +330,55 @@ local function render_slots(slots, cfg)
         end
     end
     return elements
+end
+
+-- (1c) composite_image — render the slots into an off-screen canvas and grab
+-- the result as a single hs.image suitable for a menu bar icon. The canvas is
+-- never shown; it exists only to be rasterised.
+---@param items table[]
+---@param focused_id number|nil
+---@param cfg table
+---@return userdata|nil hs.image, number content_w
+local function composite_image(items, focused_id, cfg)
+    local slots, content_w = layout_slots(items, focused_id, cfg, cached_icon)
+    local elements = render_slots(slots, cfg)
+    local c = Canvas.new({ x = 0, y = 0, w = content_w, h = cfg.height })
+    c:replaceElements(elements)
+    local img = c:imageFromCanvas()
+    c:delete()
+    return img, content_w
+end
+
+-- (1d) build_menu — the dropdown listing every window. Each entry shows the
+-- app icon and (optionally) the window title, and focuses the window on click.
+---@param items table[]
+---@param cfg table
+---@return table[] menuTable
+local function build_menu(items, cfg)
+    local menu = {}
+    for _, item in ipairs(items) do
+        local name = (item.app and item.app:name()) or "?"
+        local title = name
+        if cfg.show_titles and item.title and item.title ~= "" then
+            title = name .. " — " .. item.title
+        end
+        local entry = {
+            title = title,
+            image = cached_icon(item.bundle_id, cfg.menu_icon_size),
+        }
+        if cfg.click_to_focus then
+            local window = item.window
+            entry.fn = function()
+                if window then
+                    window:focus()
+                end
+            end
+        else
+            entry.disabled = true
+        end
+        menu[#menu + 1] = entry
+    end
+    return menu
 end
 
 -- transform a source's window list into the item shape the layout expects
@@ -457,158 +412,125 @@ local function collect_windows(source, space)
 end
 
 -- =====================================================================
--- (2) CANVAS MANAGER — owns the three per-screen maps
+-- (2) MENU BAR MANAGER — owns the single system menu bar item
 -- =====================================================================
 
-local CanvasManager = {}
-CanvasManager.__index = CanvasManager
+local MenubarManager = {}
+MenubarManager.__index = MenubarManager
 
-function CanvasManager.new()
-    return setmetatable({ _canvas = {}, _key = {}, _items = {} }, CanvasManager)
+function MenubarManager.new()
+    return setmetatable({ _item = nil, _in_bar = false, _items = {} }, MenubarManager)
 end
 
--- ensure a canvas exists for `screen`, recreating it when position config
--- changed since the last build. The click routing is wired at creation.
----@param screen userdata hs.screen
+-- lazily create the underlying hs.menubar item
 ---@param cfg table
----@return userdata canvas
-function CanvasManager:get_or_create(screen, cfg)
-    local sid = screen:id()
-    local key = position_key(cfg)
-    local canvas = self._canvas[sid]
-    if canvas and self._key[sid] == key then
-        return canvas
+---@return userdata|nil menubar item
+function MenubarManager:ensure(cfg)
+    if self._item then
+        return self._item
     end
-    if canvas then
-        canvas:delete()
+    if not Menubar then
+        return nil
     end
-    local mgr = self
-    canvas = make_canvas(screen, cfg, function()
-        return PaperLine.click_to_focus
-    end, function(id)
-        local prefix, idx_str = id:match("^(icon_)(%d+)$")
-        if not prefix then
-            return
-        end
-        local idx = tonumber(idx_str)
-        local items = mgr._items[sid]
-        if items and idx and idx >= 1 and idx <= #items then
-            local target = items[idx]
-            if target and target.window then
-                target.window:focus()
-            end
-        end
-    end)
-    self._canvas[sid] = canvas
-    self._key[sid] = key
-    return canvas
+    self._item = Menubar.new(true, cfg.autosave_name or PaperLine.autosave_name)
+    self._in_bar = self._item ~= nil
+    return self._item
 end
 
--- render new elements on the screen's canvas, persist items for click routing.
--- Resizes the canvas to the measured content width so the bar contracts to
--- min content and blank screen area is never part of the (clickable) canvas.
----@param screen userdata hs.screen
+-- update the menu bar item with a fresh composite icon and dropdown menu
 ---@param items table[]
----@param elements table[]
+---@param image userdata|nil hs.image
+---@param menu table[]
 ---@param cfg table
----@param content_w number
-function CanvasManager:show_with(screen, items, elements, cfg, content_w)
-    local canvas = self:get_or_create(screen, cfg)
-    canvas:size({ w = content_w, h = cfg.height })
-    canvas:replaceElements(elements)
-    canvas:show()
-    self._items[screen:id()] = items
-end
-
----@param sid number
-function CanvasManager:evict_screen(sid)
-    if self._canvas[sid] then
-        self._canvas[sid]:delete()
-        self._canvas[sid] = nil
-        self._key[sid] = nil
-        self._items[sid] = nil
+function MenubarManager:show_with(items, image, menu, cfg)
+    local item = self:ensure(cfg)
+    if not item then
+        return
     end
-end
-
-function CanvasManager:evict_all()
-    for sid in pairs(self._canvas) do
-        self:evict_screen(sid)
+    if not self._in_bar then
+        item:returnToMenuBar()
+        self._in_bar = true
     end
+    item:setTitle(nil)
+    item:setIcon(image, false) -- false: keep app-icon color (not a template)
+    item:setMenu(menu)
+    self._items = items
 end
 
----@param alive_sids table number → true
-function CanvasManager:gc_to(alive_sids)
-    for sid in pairs(self._canvas) do
-        if not alive_sids[sid] then
-            self:evict_screen(sid)
-        end
+-- pull the item out of the menu bar (e.g. nothing to show, or hidden)
+function MenubarManager:hide()
+    if self._item and self._in_bar then
+        self._item:removeFromMenuBar()
+        self._in_bar = false
     end
+    self._items = {}
 end
 
----@param sid number
----@return table[]|nil
-function CanvasManager:items_for(sid)
-    return self._items[sid]
+-- destroy the item entirely
+function MenubarManager:destroy()
+    if self._item then
+        self._item:delete()
+        self._item = nil
+    end
+    self._in_bar = false
+    self._items = {}
 end
 
--- exposed for :dump
----@return table
-function CanvasManager:all_items()
+---@return table[]
+function MenubarManager:items()
     return self._items
+end
+
+---@return boolean
+function MenubarManager:in_bar()
+    return self._in_bar
 end
 
 -- =====================================================================
 -- INSTANCE
 -- =====================================================================
 
-local canvas_manager = CanvasManager.new()
+local menubar_manager = MenubarManager.new()
 
 -- =====================================================================
 -- PAPERLINE METHODS
 -- =====================================================================
 
----@param screen userdata hs.screen
----@param source table
----@param cfg table
-local function redraw_screen(screen, source, cfg)
-    local sid = screen:id()
-    cfg = merge_cfg(cfg, screen_override(screen))
-    local space = Spaces.activeSpaceOnScreen(screen)
+---redraw the menu bar item from the chosen screen's active space
+function PaperLine:redraw()
+    if not is_started then
+        return
+    end
+    local cfg = read_cfg()
+    cfg.autosave_name = PaperLine.autosave_name
+
+    if not is_visible then
+        menubar_manager:hide()
+        return
+    end
+
+    local source = PaperLine.paperwm_source_fn and PaperLine.paperwm_source_fn() or nil
+    if not source then
+        menubar_manager:hide()
+        self.logger.w("PaperWM.spoon not loaded — PaperLine bar will be empty")
+        return
+    end
+
+    local screen = resolve_screen(cfg)
+    local space = screen and Spaces.activeSpaceOnScreen(screen)
     local items = space and collect_windows(source, space) or {}
 
-    if #items == 0 or not is_visible then
-        canvas_manager:evict_screen(sid)
+    if #items == 0 then
+        menubar_manager:hide()
         return
     end
 
     local focused_window = Window.focusedWindow()
     local focused_id = focused_window and focused_window:id() or nil
 
-    local slots, content_w = layout_slots(items, focused_id, cfg, cached_icon)
-    local elements = render_slots(slots, cfg)
-    canvas_manager:show_with(screen, items, elements, cfg, content_w)
-end
-
----redraw the bar on all configured screens
-function PaperLine:redraw()
-    if not is_started then
-        return
-    end
-    local cfg = read_cfg()
-    local source = PaperLine.paperwm_source_fn and PaperLine.paperwm_source_fn() or nil
-    if not source then
-        canvas_manager:evict_all()
-        self.logger.w("PaperWM.spoon not loaded — PaperLine bar will be empty")
-        return
-    end
-
-    local screens = cfg.show_on_all_screens and Screen.allScreens() or { Screen.mainScreen() }
-    local alive = {}
-    for _, screen in ipairs(screens) do
-        alive[screen:id()] = true
-        redraw_screen(screen, source, cfg)
-    end
-    canvas_manager:gc_to(alive)
+    local image = composite_image(items, focused_id, cfg)
+    local menu = build_menu(items, cfg)
+    menubar_manager:show_with(items, image, menu, cfg)
 end
 
 ---debounced redraw — coalesces bursts of events into one repaint
@@ -663,7 +585,7 @@ function PaperLine:start()
     return self
 end
 
----stop watching for events and hide the bar
+---stop watching for events and remove the menu bar item
 ---@return PaperLine
 function PaperLine:stop()
     if not is_started then
@@ -686,17 +608,17 @@ function PaperLine:stop()
         app_watcher:stop()
         app_watcher = nil
     end
-    canvas_manager:evict_all()
+    menubar_manager:destroy()
     return self
 end
 
----toggle the bar's visibility
+---toggle the menu bar item's visibility
 function PaperLine:toggle()
     is_visible = not is_visible
     if is_visible then
         self:redraw()
     else
-        canvas_manager:evict_all()
+        menubar_manager:hide()
     end
 end
 
@@ -730,21 +652,21 @@ function PaperLine:dump()
     print("--- PaperLine State ---")
     print(string.format("is_started: %s", tostring(is_started)))
     print(string.format("is_visible: %s", tostring(is_visible)))
+    print(string.format("in_menubar: %s", tostring(menubar_manager:in_bar())))
     print(string.format("cached icons: %d", count(icon_cache)))
-    for sid, items in pairs(canvas_manager:all_items()) do
-        print(string.format("screen %d items (%d):", sid, #items))
-        for i, item in ipairs(items) do
-            print(
-                string.format(
-                    "  [%d] c%d r%d %s — %s",
-                    i,
-                    item.col,
-                    item.row,
-                    item.app and item.app:name() or "?",
-                    item.title
-                )
+    local items = menubar_manager:items()
+    print(string.format("items (%d):", #items))
+    for i, item in ipairs(items) do
+        print(
+            string.format(
+                "  [%d] c%d r%d %s — %s",
+                i,
+                item.col,
+                item.row,
+                item.app and item.app:name() or "?",
+                item.title
             )
-        end
+        )
     end
     print("-----------------------")
 end

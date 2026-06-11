@@ -3,14 +3,19 @@
 <img width="290" height="59" alt="image" src="https://github.com/user-attachments/assets/eecb2ec6-7003-4c96-abd5-58c5981151f7" />
 
 
-A Hammerspoon spoon that draws a status bar at the top of the screen with the
-app icons of your currently focused PaperWM windows, in the same order as
+A Hammerspoon spoon that lives in the system menu bar and shows the app icons of
+your currently focused PaperWM windows, in the same order as
 `PaperWM.state.windowList(space)` — left-to-right across columns, top-to-bottom
 within each column.
 
-The focused window's icon is highlighted with a border, and clicking an icon
-focuses that window. The bar appears on every screen, follows Mission Control
-space changes, and respects PaperWM's tiling order in real time.
+The whole row is composited into a single menu bar icon. The focused window's
+icon is highlighted with a border. Clicking the item drops down a menu listing
+every window, and selecting one focuses it. The item follows Mission Control
+space changes and respects PaperWM's tiling order in real time.
+
+Because the system menu bar is a single, global element, PaperLine mirrors one
+screen's windows at a time (the main screen by default). See
+[Choosing a screen](#choosing-a-screen).
 
 ## Install
 
@@ -43,58 +48,56 @@ PaperLine:bindHotkeys({
 })
 ```
 
-`PaperLine:toggle()` is also exposed for binding to other gestures or menubar
-items.
+`PaperLine:toggle()` is also exposed for binding to other gestures. Toggling
+removes the item from the menu bar and returns it.
 
 ## Configuration
 
-Set these on the `PaperLine` module before or after `:start()`. The bar will
+Set these on the `PaperLine` module before or after `:start()`. The item will
 re-read them on the next redraw.
 
-| Key                    | Default                       | Description                                       |
-| ---------------------- | ----------------------------- | ------------------------------------------------- |
-| `height`               | `48`                          | Bar height in pixels                              |
-| `icon_size`            | `25`                          | Icon size in pixels                               |
-| `icon_padding`         | `8`                           | Gap between icons (also left/right edge padding)  |
-| `bg_color`             | fully transparent             | Bar background color table                        |
-| `active_color`         | white @ 0.75 alpha            | Border color for the focused window's icon        |
-| `inactive_alpha`       | `1`                           | Alpha for non-focused icons                       |
-| `max_icons`            | `nil`                         | Max icons to draw; `nil` = all                    |
-| `click_to_focus`       | `true`                        | Click an icon to focus that window                |
-| `show_on_all_screens`  | `true`                        | Show on every screen                              |
-| `position`             | `"top"`                       | `"top"` (overlays menubar) or `"below_menubar"`   |
-| `x_offset`             | `960`                         | Horizontal offset in pixels from default position |
-| `y_offset`             | `-3`                          | Vertical offset in pixels from default position   |
-| `start_hidden`         | `false`                       | If true, start with bar hidden                    |
-| `per_screen`           | `{}`                          | Per-monitor config overrides (see below)          |
+| Key              | Default            | Description                                          |
+| ---------------- | ------------------ | ---------------------------------------------------- |
+| `height`         | `22`               | Composite image height in pixels (menu-bar sized)    |
+| `icon_size`      | `18`               | Icon size in pixels in the menu bar image            |
+| `icon_padding`   | `3`                | Gap between icons (also left/right edge padding)     |
+| `bg_color`       | fully transparent  | Image background color table                         |
+| `active_color`   | white @ 0.75 alpha | Border color for the focused window's icon           |
+| `inactive_alpha` | `1`                | Alpha for non-focused icons                          |
+| `max_icons`      | `nil`              | Max icons to draw; `nil` = all                       |
+| `menu_icon_size` | `16`               | Icon size in the dropdown menu                       |
+| `click_to_focus` | `true`             | Click a menu entry to focus that window              |
+| `show_titles`    | `true`             | Show window titles next to app names in the menu     |
+| `screen`         | `nil`              | Which screen's windows to mirror; `nil` = main       |
+| `autosave_name`  | `"PaperLine"`      | Menu bar autosave name (macOS restores position)     |
+| `start_hidden`   | `false`            | If true, start with the item hidden                  |
 
 Example:
 
 ```lua
-PaperLine.height = 28
-PaperLine.icon_size = 18
-PaperLine.x_offset = 100    -- 100px from the left edge
-PaperLine.y_offset = -4     -- 4px above the default position
-PaperLine.bg_color = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0.75 }
+PaperLine.icon_size = 16
+PaperLine.icon_padding = 4
+PaperLine.show_titles = false
+PaperLine.bg_color = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0 }
 PaperLine:start()
 ```
 
-### Per-monitor configuration
+## Choosing a screen
 
-`per_screen` maps a screen identifier to a table of config overrides. Any of
-the keys above may be overridden per monitor; anything you don't specify falls
-back to the top-level value. This is useful when, for example, an external
-display sits at a different horizontal offset than your built-in screen, or you
-want larger icons on a high-resolution monitor.
+The system menu bar is a single, global UI element, so PaperLine cannot draw a
+different row per display. Instead it mirrors the windows of one screen's active
+space. By default that is the main screen (`hs.screen.mainScreen()`).
 
-The screen identifier is matched, in order, against:
+To pin it to a specific display, set `PaperLine.screen` to a screen identifier.
+The value is matched, in order, against:
 
 1. the screen's UUID (`hs.screen:getUUID()`),
 2. its name (`hs.screen:name()`),
 3. its numeric id as a string (`tostring(hs.screen:id())`).
 
 Prefer UUID or name — both are stable across reboots, whereas numeric ids are
-not. Run this in the Hammerspoon console to list your screens:
+not. If the requested screen isn't connected, PaperLine falls back to the main
+screen. Run this in the Hammerspoon console to list your screens:
 
 ```lua
 for i, s in ipairs(hs.screen.allScreens()) do
@@ -110,35 +113,35 @@ Example output:
 ```
 
 ```lua
-PaperLine.icon_size = 25         -- default for screens not listed below
-PaperLine.per_screen = {
-    ["Built-in Retina Display"] = { icon_size = 18, height = 32, x_offset = 600 },
-    ["LG UltraFine"]            = { icon_size = 32, y_offset = 0 },
-}
+PaperLine.screen = "Built-in Retina Display"
 PaperLine:start()
 ```
 
 ## How it works
 
 PaperLine subscribes to window, space, screen, and app events, and on each
-change queries `PaperWM.state.windowList(space)` for the active space on each
-screen. The result is drawn into a per-screen `hs.canvas` that sits just
-below the system menu bar at `hs.canvas.windowLevels.status` (floating, on
-all spaces, above the menubar).
+change queries `PaperWM.state.windowList(space)` for the active space on the
+chosen screen. The result is laid out and rendered into an off-screen
+`hs.canvas`, rasterised to a single `hs.image` with `imageFromCanvas()`, and set
+as the icon of an `hs.menubar` item. A dropdown menu is built alongside, with one
+entry per window.
 
 Icons are loaded once per (bundle id, size) via `hs.image.imageFromAppBundle`
-and cached in memory. Clicks on icons call `window:focus()` on the
+and cached in memory. Selecting a menu entry calls `window:focus()` on the
 corresponding PaperWM-tracked window.
 
-If PaperWM isn't loaded, the bar is hidden with a warning. Start PaperWM and
-the bar will appear on the next event (or call `PaperLine:refresh()`).
+If PaperWM isn't loaded, the item is removed from the menu bar with a warning.
+Start PaperWM and it will reappear on the next event (or call
+`PaperLine:refresh()`).
 
 ## Limitations
 
-- The bar's content is driven by PaperWM's window list. Windows that are
-  floating (per `PaperWM.floating.isFloating`) are not shown.
-- Visibility in fullscreen apps follows macOS's normal window layering. Apps
-  that aggressively hide other windows (some games, fullscreen video) may
-  cover the bar.
-- Icons are loaded lazily. The first time a bundle id appears the icon
-  may take a moment to render.
+- The content is driven by PaperWM's window list. Windows that are floating (per
+  `PaperWM.floating.isFloating`) are not shown.
+- The menu bar is global, so only one screen's windows can be shown at a time.
+  Use `PaperLine.screen` to choose which.
+- Icons are loaded lazily. The first time a bundle id appears the icon may take
+  a moment to render.
+- Clicking the menu bar item opens the dropdown; per-icon click-to-focus is not
+  possible because the row is a single composited image. Focus a window by
+  selecting it from the dropdown instead.
