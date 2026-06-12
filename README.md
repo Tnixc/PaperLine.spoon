@@ -56,29 +56,28 @@ removes the item from the menu bar and returns it.
 Set these on the `PaperLine` module before or after `:start()`. The item will
 re-read them on the next redraw.
 
-| Key              | Default            | Description                                          |
-| ---------------- | ------------------ | ---------------------------------------------------- |
-| `height`         | `22`               | Composite image height in pixels (menu-bar sized)    |
-| `icon_size`      | `18`               | Icon size in pixels in the menu bar image            |
-| `icon_padding`   | `3`                | Gap between icons (also left/right edge padding)     |
-| `bg_color`       | fully transparent  | Image background color table                         |
-| `active_color`   | white @ 0.75 alpha | Border color for the focused window's icon           |
-| `inactive_alpha` | `1`                | Alpha for non-focused icons                          |
-| `max_icons`      | `nil`              | Max icons to draw; `nil` = all                       |
-| `menu_icon_size` | `16`               | Icon size in the dropdown menu                       |
-| `click_to_focus` | `true`             | Click a menu entry to focus that window              |
-| `show_titles`    | `true`             | Show window titles next to app names in the menu     |
-| `screen`         | `nil`              | Which screen's windows to mirror; `nil` = main       |
-| `autosave_name`  | `"PaperLine"`      | Menu bar autosave name (macOS restores position)     |
-| `start_hidden`   | `false`            | If true, start with the item hidden                  |
+| Key              | Default            | Description                                                       |
+| ---------------- | ------------------ | ----------------------------------------------------------------- |
+| `icon_padding`   | `3`                | Gap between icons, and the inset above/below each icon. Icons fill the fixed menu bar height minus this padding, so a smaller value means larger icons. |
+| `active_color`   | white @ 0.75 alpha | Border color for the focused window's icon                        |
+| `inactive_alpha` | `1`                | Alpha for non-focused icons                                       |
+| `max_icons`      | `nil`              | Max icons to draw; `nil` = all                                    |
+| `menu_icon_size` | `16`               | Icon size in the dropdown menu                                    |
+| `click_to_focus` | `true`             | Click a menu entry to focus that window                           |
+| `show_titles`    | `true`             | Show window titles next to app names in the menu                  |
+| `screen`         | `nil`              | Which screen's windows to mirror; `nil` = main                    |
+| `autosave_name`  | `"PaperLine"`      | Menu bar autosave name (macOS restores position)                  |
+| `start_hidden`   | `false`            | If true, start with the item hidden                               |
+
+The menu bar has a fixed height, so the icon size is not directly configurable —
+icons are always drawn as large as the bar allows. Lower `icon_padding` for
+bigger icons, raise it for smaller ones with more breathing room.
 
 Example:
 
 ```lua
-PaperLine.icon_size = 16
-PaperLine.icon_padding = 4
+PaperLine.icon_padding = 2
 PaperLine.show_titles = false
-PaperLine.bg_color = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0 }
 PaperLine:start()
 ```
 

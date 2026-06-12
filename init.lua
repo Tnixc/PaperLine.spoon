@@ -22,10 +22,7 @@
 ---
 --- Set these on the `PaperLine` module before or after `:start()`:
 ---
---- - `PaperLine.height`         image height in pixels (default: 22, menu-bar sized)
---- - `PaperLine.icon_size`      icon size in pixels (default: 18)
---- - `PaperLine.icon_padding`   gap between icons (default: 3)
---- - `PaperLine.bg_color`       image background color table (default: fully transparent)
+--- - `PaperLine.icon_padding`   gap between icons, also the inset above/below each icon (default: 3). Icons fill the fixed menu bar height minus this padding, so a smaller padding means larger icons.
 --- - `PaperLine.active_color`   highlight color for the focused window's icon (default: white @ 0.75 alpha)
 --- - `PaperLine.inactive_alpha` alpha for non-focused icons (default: 1)
 --- - `PaperLine.max_icons`      max icons to draw; `nil` = all
@@ -97,11 +94,13 @@ PaperLine.homepage = "https://github.com/.../PaperLine.spoon"
 
 PaperLine.logger = Logger.new(PaperLine.name)
 
+-- The system menu bar has a fixed thickness, so the composite image height is
+-- not configurable. Icons are sized to fill that height minus padding, so they
+-- are always as large as the menu bar allows.
+local BAR_HEIGHT <const> = 22
+
 -- configuration with sensible defaults
-PaperLine.height = 22
-PaperLine.icon_size = 18
 PaperLine.icon_padding = 3
-PaperLine.bg_color = { red = 0, green = 0, blue = 0, alpha = 0 }
 PaperLine.active_color = { red = 1, green = 1, blue = 1, alpha = 0.75 }
 PaperLine.inactive_alpha = 1
 PaperLine.max_icons = nil
@@ -134,11 +133,15 @@ local icon_cache = {}
 
 -- config snapshot — read once at :redraw entry, threaded downstream
 local function read_cfg()
+    local padding = PaperLine.icon_padding
+    -- icons fill the fixed bar height minus padding above and below, so they
+    -- are always as large as the menu bar allows.
+    local icon_size = math.max(1, BAR_HEIGHT - padding * 2)
     return {
-        height = PaperLine.height,
-        icon_size = PaperLine.icon_size,
-        icon_padding = PaperLine.icon_padding,
-        bg_color = PaperLine.bg_color,
+        height = BAR_HEIGHT,
+        icon_size = icon_size,
+        icon_padding = padding,
+        bg_color = { red = 0, green = 0, blue = 0, alpha = 0 },
         active_color = PaperLine.active_color,
         inactive_alpha = PaperLine.inactive_alpha,
         max_icons = PaperLine.max_icons,
